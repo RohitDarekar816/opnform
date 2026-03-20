@@ -2,7 +2,7 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: afintrix-db
+    container_name: opnform-db
     networks:
       - afintrix-network
     environment:
@@ -21,7 +21,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: afintrix-redis
+    container_name: opnform-redis
     networks:
       - afintrix-network
       - proxy
@@ -40,7 +40,7 @@ services:
       dockerfile: docker/Dockerfile.api
       args:
         APP_VERSION: ${APP_VERSION:-unknown}
-    container_name: afintrix-api
+    container_name: opnform-api
     working_dir: /usr/share/nginx/html
     networks:
       - afintrix-network
@@ -90,7 +90,7 @@ services:
 
   api-worker:
     <<: *api-service
-    container_name: afintrix-api-worker
+    container_name: opnform-api-worker
     command:
       [
         "php",
@@ -110,7 +110,7 @@ services:
 
   api-scheduler:
     <<: *api-service
-    container_name: afintrix-api-scheduler
+    container_name: opnform-api-scheduler
     command: ["php", "artisan", "schedule:work"]
     healthcheck:
       test:
@@ -127,7 +127,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.client
-    container_name: afintrix-ui
+    container_name: opnform-ui
     networks:
       - afintrix-network
       - proxy
@@ -152,7 +152,7 @@ services:
 
   ingress:
     image: nginx:1.27-alpine
-    container_name: afintrix-ingress
+    container_name: opnform-ingress
     networks:
       - afintrix-network
       - proxy
