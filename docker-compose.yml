@@ -24,6 +24,7 @@ services:
     container_name: afintrix-redis
     networks:
       - afintrix-network
+      - proxy
     volumes:
       - afintrix-redis-data:/data
     healthcheck:
@@ -43,6 +44,7 @@ services:
     working_dir: /usr/share/nginx/html
     networks:
       - afintrix-network
+      - proxy
     volumes:
       - afintrix-storage:/usr/share/nginx/html/storage:rw
     environment:
@@ -128,6 +130,7 @@ services:
     container_name: afintrix-ui
     networks:
       - afintrix-network
+      - proxy
     environment:
       NODE_ENV: production
       NUXT_PUBLIC_APP_ENV: production
@@ -152,11 +155,12 @@ services:
     container_name: afintrix-ingress
     networks:
       - afintrix-network
+      - proxy
     volumes:
       - ./docker/nginx.prod.conf:/etc/nginx/templates/default.conf.template:ro
-    ports:
-      - "${HTTP_PORT:-81}:80"
-      - "${HTTPS_PORT:-8443}:443"
+    expose:
+      - "80"
+      - "443"
     environment:
       NGINX_MAX_BODY_SIZE: 64m
     depends_on:
@@ -175,6 +179,8 @@ services:
 networks:
   afintrix-network:
     name: afintrix-network
+  proxy:
+    external: true
 
 volumes:
   afintrix-db-data:
