@@ -136,7 +136,7 @@ services:
       NUXT_PUBLIC_APP_ENV: production
       NUXT_PUBLIC_APP_URL: ${NUXT_PUBLIC_APP_URL:-/}
       NUXT_PUBLIC_API_BASE: /api
-      NUXT_PRIVATE_API_BASE: http://afintrix-api
+      NUXT_PRIVATE_API_BASE: http://opnform-api
       NUXT_PUBLIC_H_CAPTCHA_SITE_KEY: ${NUXT_PUBLIC_H_CAPTCHA_SITE_KEY:-}
       NUXT_PUBLIC_RE_CAPTCHA_SITE_KEY: ${NUXT_PUBLIC_RE_CAPTCHA_SITE_KEY:-}
     depends_on:
