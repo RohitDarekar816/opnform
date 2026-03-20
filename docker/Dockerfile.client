@@ -1,47 +1,38 @@
-FROM node:24-alpine AS javascript-builder
+FROM node:22-alpine AS javascript-builder
 WORKDIR /app
 
-# It's best to add as few files as possible before running the build commands
-# as they will be re-run everytime one of those files changes.
-#
-# It's possible to run npm install with only the package.json and package-lock.json file.
+ADD ./client/package.json ./client/package-lock.json* ./
 
-ADD ./client/package.json ./client/package-lock.json ./
+RUN apk add --no-cache git dumb-init
 
-# Install git and other necessary build tools
-RUN apk add --no-cache git
+RUN npm ci --ignore-scripts
 
-# Clear npm cache, remove existing node_modules, and install dependencies
-RUN npm cache clean --force && \
-    rm -rf node_modules && \
-    npm ci
-
-# Clean up after npm install to free memory
-RUN npm cache clean --force
-
-# Explicitly install the correct version of esbuild
-# RUN npm install esbuild@0.21.5
-
-ADD ./client/ /app/
+ADD ./client/ ./
 
 ENV NODE_OPTIONS="--max-old-space-size=6144"
-# Set production mode to reduce memory usage
 ENV NODE_ENV=production
-# Disable source maps to reduce memory usage
 ENV GENERATE_SOURCEMAP=false
-# Additional memory optimizations
 ENV NUXT_TELEMETRY_DISABLED=1
-# Optimize Vite build for memory
-ENV VITE_NODE_OPTIONS="--max-old-space-size=10240"
-# Run the build with additional memory optimizations and limited concurrency
-RUN --mount=type=tmpfs,target=/tmp \
-    NODE_OPTIONS="--max-old-space-size=10240" \
-    NUXT_BUILD_CONCURRENCY=1 \
-    npm run build
+ENV VITE_NODE_OPTIONS="--max-old-space-size=8192"
 
-FROM node:24-alpine
+RUN npm run build
+
+FROM node:22-alpine AS runtime
 WORKDIR /app
-COPY --from=javascript-builder /app/.output/ /app/
-RUN ls /app/
 
-CMD [ "node", "./server/index.mjs" ]
+RUN apk add --no-cache dumb-init curl
+
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodeapp -u 1001 -G nodejs
+
+COPY --from=javascript-builder --chown=nodeapp:nodejs /app/.output ./
+
+USER nodeapp
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD curl -f http://localhost:3000/ || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "./server/index.mjs"]

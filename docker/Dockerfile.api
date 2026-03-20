@@ -1,89 +1,78 @@
-# Build stage - using PHP CLI image with extensions
-FROM php:8.3-cli AS builder
+FROM php:8.3-fpm-alpine AS builder
 
-# Install composer and extensions needed for dependency installation
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     libzip-dev \
     libpng-dev \
+    zlib-dev \
     unzip \
     git \
+    oniguruma-dev \
+    icu-dev \
+    postgresql-dev \
+    && docker-php-ext-configure pgsql \
+    && docker-php-ext-configure gd \
     && docker-php-ext-install -j$(nproc) \
     bcmath \
     gd \
     zip \
+    pdo \
+    pgsql \
+    pdo_pgsql \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 WORKDIR /app
 
-# Copy the entire source code for proper installation
+COPY api/composer.json api/composer.lock* ./
 COPY api/ .
+RUN composer install --optimize-autoloader --no-dev --no-interaction
+RUN composer dump-autoload --optimize --classmap-authoritative
 
-# Install dependencies including dev dependencies
-RUN composer install --optimize-autoloader --no-interaction \
-    --ignore-platform-req=php \
-    --ignore-platform-req=ext-bcmath \
-    --ignore-platform-req=ext-gd
+FROM php:8.3-fpm-alpine AS runtime
 
-# Final stage - smaller runtime image
-FROM php:8.3-fpm-alpine
-
-# Accept version build argument
 ARG APP_VERSION=unknown
 
-# Install runtime dependencies
 RUN apk add --no-cache \
     libzip \
     libpng \
+    zlib \
     postgresql-client \
     libpq \
-    procps \
-    unzip \
     bash \
-    icu-libs \
-    && rm -rf /var/cache/apk/*
+    oniguruma \
+    icu \
+    curl \
+    dumb-init
 
-# Install build dependencies and PHP extensions
-RUN apk add --no-cache --virtual .build-deps \
-    $PHPIZE_DEPS \
-    libzip-dev \
-    libpng-dev \
-    postgresql-dev \
-    oniguruma-dev \
-    icu-dev \
-    && docker-php-ext-configure pgsql \
-    && docker-php-ext-configure gd \
-    && docker-php-ext-install -j$(nproc) \
-    pdo \
-    zip \
-    gd \
-    pgsql \
-    pdo_pgsql \
-    bcmath \
-    && pecl install redis \
-    && docker-php-ext-enable redis \
-    && apk del .build-deps
+WORKDIR /usr/share/nginx/html
 
-WORKDIR /usr/share/nginx/html/
-
-# Create storage directories
 RUN mkdir -p storage/framework/sessions \
     storage/framework/views \
     storage/framework/cache \
+    storage/framework/cache/data \
     storage/logs \
     storage/app/public \
     bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
-    && chmod -R 775 storage bootstrap/cache
+    && chmod -R 775 storage bootstrap/cache \
+    && adduser -S nodeapp -u 1001 -G www-data
 
-# Copy the entire application from the builder stage
-COPY --from=builder /app/ ./
+COPY --from=builder --chown=www-data:www-data /app /usr/share/nginx/html/
 
-# Set version as environment variable
-ENV APP_VERSION_DOCKER=$APP_VERSION
+RUN chown -R www-data:www-data /usr/share/nginx/html
 
-# Setup entrypoint
-COPY docker/php-fpm-entrypoint /usr/local/bin/opnform-entrypoint
+COPY docker/php-fpm-entrypoint /usr/local/bin/afintrix-entrypoint
 RUN chmod a+x /usr/local/bin/*
 
-ENTRYPOINT ["/usr/local/bin/opnform-entrypoint"]
+RUN echo "memory_limit = ${PHP_MEMORY_LIMIT:-512M}" > /usr/local/etc/php/conf.d/99-custom.ini && \
+    echo "max_execution_time = ${PHP_MAX_EXECUTION_TIME:-300}" >> /usr/local/etc/php/conf.d/99-custom.ini && \
+    echo "upload_max_filesize = ${PHP_UPLOAD_MAX_FILESIZE:-64M}" >> /usr/local/etc/php/conf.d/99-custom.ini && \
+    echo "post_max_size = ${PHP_POST_MAX_SIZE:-64M}" >> /usr/local/etc/php/conf.d/99-custom.ini
+
+ENV APP_VERSION_DOCKER=$APP_VERSION
+
+USER www-data
+
+EXPOSE 9000
+
+ENTRYPOINT ["/usr/local/bin/afintrix-entrypoint"]
 CMD ["php-fpm"]

@@ -1,10 +1,3 @@
-# Local Afintrix stack (does not replace docker-compose.yml / docker-compose.dev.yml).
-# Usage from repo root: docker compose -f docker-compose.local.yml up --build
-#
-# Before first run (once on the host):
-#   cd api && composer install
-# Fedora/RHEL (SELinux): bind mounts use :z so the container can read ./api and ./client.
-
 name: afintrix-local
 
 networks:
@@ -21,7 +14,7 @@ volumes:
 
 services:
   afintrix-db:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: afintrix-db
     networks:
       - afintrix-network
@@ -53,7 +46,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # :z = SELinux shared label (Fedora/RHEL). Use host composer install; no empty vendor volume.
       - ./api:/usr/share/nginx/html:rw,z
       - afintrix-storage:/usr/share/nginx/html/storage
     env_file:

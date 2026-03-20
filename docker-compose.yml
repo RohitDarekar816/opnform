@@ -1,60 +1,115 @@
 ---
 services:
-  api: &api-environment
-    image: jhumanj/opnform-api:latest
-    container_name: opnform-api
-    volumes: &api-environment-volumes
-      - opnform_storage:/usr/share/nginx/html/storage:rw
-    environment: &api-env
+  db:
+    image: postgres:16-alpine
+    container_name: afintrix-db
+    networks:
+      - afintrix-network
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-afintrix}
+      POSTGRES_USER: ${DB_USERNAME:-afintrix}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+    volumes:
+      - afintrix-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-afintrix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: afintrix-redis
+    networks:
+      - afintrix-network
+    volumes:
+      - afintrix-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  api: &api-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+      args:
+        APP_VERSION: ${APP_VERSION:-unknown}
+    container_name: afintrix-api
+    working_dir: /usr/share/nginx/html
+    networks:
+      - afintrix-network
+    volumes:
+      - afintrix-storage:/usr/share/nginx/html/storage:rw
+    environment:
       APP_ENV: production
-      # Database settings
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY}
+      APP_URL: ${APP_URL:-http://localhost}
+      FRONT_URL: ${FRONT_URL:-http://localhost}
       DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-afintrix}
+      DB_USERNAME: ${DB_USERNAME:-afintrix}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_CONNECTION: pgsql
       REDIS_HOST: redis
-      DB_DATABASE: ${DB_DATABASE:-forge}
-      DB_USERNAME: ${DB_USERNAME:-forge}
-      DB_PASSWORD: ${DB_PASSWORD:-forge}
-      DB_CONNECTION: ${DB_CONNECTION:-pgsql}
-      # PHP Configuration
-      PHP_MEMORY_LIMIT: "1G"
-      PHP_MAX_EXECUTION_TIME: "600"
+      REDIS_PORT: 6379
+      REDIS_CLIENT: predis
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      FILESYSTEM_DRIVER: local
+      LOCAL_FILESYSTEM_VISIBILITY: public
+      PHP_MEMORY_LIMIT: "512M"
+      PHP_MAX_EXECUTION_TIME: "300"
       PHP_UPLOAD_MAX_FILESIZE: "64M"
       PHP_POST_MAX_SIZE: "64M"
-    env_file:
-      - ./api/.env
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy # Depend on redis being healthy too
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "php /usr/share/nginx/html/artisan about || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "php /usr/share/nginx/html/artisan about --only=environment 2>&1 | grep -q 'Environment' || exit 1",
+        ]
       interval: 30s
       timeout: 15s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
 
   api-worker:
-    <<: *api-environment
-    container_name: opnform-api-worker
-    command: ["php", "artisan", "queue:work"]
-    environment:
-      <<: *api-env
-      APP_ENV: production
+    <<: *api-service
+    container_name: afintrix-api-worker
+    command:
+      [
+        "php",
+        "artisan",
+        "queue:work",
+        "--sleep=3",
+        "--tries=3",
+        "--max-time=3600",
+      ]
     healthcheck:
       test:
         ["CMD-SHELL", "pgrep -f 'php artisan queue:work' > /dev/null || exit 1"]
-      interval: 60s
+      interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
 
   api-scheduler:
-    <<: *api-environment
-    container_name: opnform-api-scheduler
+    <<: *api-service
+    container_name: afintrix-api-scheduler
     command: ["php", "artisan", "schedule:work"]
-    environment:
-      <<: *api-env
-      APP_ENV: production
     healthcheck:
       test:
         [
@@ -64,57 +119,46 @@ services:
       interval: 60s
       timeout: 30s
       retries: 3
-      start_period: 70s # Allow time for first scheduled run and cache write
+      start_period: 70s
 
   ui:
-    image: jhumanj/opnform-client:latest
-    container_name: opnform-client
-    env_file:
-      - ./client/.env
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.client
+    container_name: afintrix-ui
+    networks:
+      - afintrix-network
+    environment:
+      NODE_ENV: production
+      NUXT_PUBLIC_APP_ENV: production
+      NUXT_PUBLIC_APP_URL: ${NUXT_PUBLIC_APP_URL:-/}
+      NUXT_PUBLIC_API_BASE: /api
+      NUXT_PRIVATE_API_BASE: http://afintrix-api
+      NUXT_PUBLIC_H_CAPTCHA_SITE_KEY: ${NUXT_PUBLIC_H_CAPTCHA_SITE_KEY:-}
+      NUXT_PUBLIC_RE_CAPTCHA_SITE_KEY: ${NUXT_PUBLIC_RE_CAPTCHA_SITE_KEY:-}
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test:
-        ["CMD-SHELL", "wget --spider -q http://localhost:3000/login || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 45s
-
-  redis:
-    image: redis:7
-    container_name: opnform-redis
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-      interval: 30s
-      timeout: 5s
-
-  db:
-    image: postgres:16
-    container_name: opnform-db
-    environment:
-      POSTGRES_DB: ${DB_DATABASE:-forge}
-      POSTGRES_USER: ${DB_USERNAME:-forge}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-forge}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-forge}"]
-      interval: 30s
-      timeout: 5s
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   ingress:
-    image: nginx:1
-    container_name: opnform-ingress
+    image: nginx:1.27-alpine
+    container_name: afintrix-ingress
+    networks:
+      - afintrix-network
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/templates/default.conf.template
+      - ./docker/nginx.prod.conf:/etc/nginx/templates/default.conf.template:ro
     ports:
-      - 80:80
+      - "${HTTP_PORT:-81}:80"
+      - "${HTTPS_PORT:-8443}:443"
     environment:
-      - NGINX_MAX_BODY_SIZE=64m
+      NGINX_MAX_BODY_SIZE: 64m
     depends_on:
       api:
         condition: service_started
@@ -126,8 +170,16 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+networks:
+  afintrix-network:
+    name: afintrix-network
 
 volumes:
-  postgres-data:
-  opnform_storage:
-  redis-data:
+  afintrix-db-data:
+    name: afintrix-db-data
+  afintrix-storage:
+    name: afintrix-storage
+  afintrix-redis-data:
+    name: afintrix-redis-data
