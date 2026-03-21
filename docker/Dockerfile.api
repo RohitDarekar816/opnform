@@ -32,16 +32,26 @@ FROM php:8.3-fpm-alpine AS runtime
 ARG APP_VERSION=unknown
 
 RUN apk add --no-cache \
-    libzip \
-    libpng \
-    zlib \
-    postgresql-client \
+    libzip-dev \
+    libpng-dev \
+    zlib-dev \
+    postgresql-dev \
     libpq \
     bash \
-    oniguruma \
-    icu \
+    oniguruma-dev \
+    icu-dev \
+    icu-libs \
     curl \
-    dumb-init
+    dumb-init \
+    && docker-php-ext-install -j$(nproc) \
+        bcmath \
+        gd \
+        zip \
+        pdo \
+        pgsql \
+        pdo_pgsql \
+    && pecl install redis \
+    && docker-php-ext-enable redis
 
 WORKDIR /usr/share/nginx/html
 
