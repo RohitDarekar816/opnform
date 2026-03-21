@@ -1,6 +1,4 @@
 # Environment files — never commit secrets
-.env
-.env.*
 !.env.production.example
 
 # OS
@@ -15,3 +13,5 @@ Thumbs.db
 
 # Docker overrides
 docker-compose.override.yml
+config.bat
+node_modules
